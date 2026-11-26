@@ -17,12 +17,3 @@ This Windows desktop prototype provides local file encryption and restoration:
 ## Important limitations
 
 This is an early prototype, not a complete backup system. It has no peer-to-peer networking, automatic folder backup, version history, or device pairing yet. It reads files into memory and has a 512 MiB file-size limit. It has not been independently security-audited. Keep separate backups of important data and do not use it as your only copy.
-
-## Development
-
-Install stable Rust and run:
-```powershell
-cargo test
-cargo run
-cargo build --release
-```
