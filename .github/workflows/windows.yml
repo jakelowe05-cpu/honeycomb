@@ -1,0 +1,51 @@
+name: Build Honeycomb for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - "**.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test --locked
+        continue-on-error: false
+
+      - name: Build release executable
+        run: cargo build --release --locked
+
+      - name: Package Windows executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item target/release/honeycomb.exe package/
+          @'
+          Honeycomb 0.2 prototype
+          This build provides local file encryption and restoration only.
+          It does not yet provide peer-to-peer backup or synchronization.
+          '@ | Set-Content package/README.txt
+          Compress-Archive -Path package/* -DestinationPath Honeycomb-Windows-x64.zip
+
+      - name: Upload downloadable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Honeycomb-Windows-x64
+          path: Honeycomb-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30
