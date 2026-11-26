@@ -17,11 +17,11 @@ const NONCE_LEN: usize = 24;
 const MAX_INPUT_BYTES: u64 = 512 * 1024 * 1024;
 
 fn derive_key(passphrase: &str, salt: &[u8]) -> Result<[u8; 32]> {
-    let params = Params::new(64 * 1024, 3, 1, Some(32))?;
+    let params = Params::new(64 * 1024, 3, 1, Some(32))\n        .map_err(|e| anyhow::anyhow!("Invalid Argon2 parameters: {e:?}"))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut key = [0u8; 32];
     argon.hash_password_into(passphrase.as_bytes(), salt, &mut key)
-        .context("Key derivation failed")?;
+        .map_err(|e| anyhow::anyhow!("Key derivation failed: {e:?}"))?;
     Ok(key)
 }
 
