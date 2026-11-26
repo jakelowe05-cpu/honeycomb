@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const MAGIC: &[u8; 8] = b"HNYB002\\0";
+const MAGIC: &[u8; 8] = b"HNYB002\0";
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 24;
 const MAX_INPUT_BYTES: u64 = 512 * 1024 * 1024;
@@ -93,7 +93,7 @@ mod tests {
         let source = temp_path("source");
         let encrypted = temp_path("encrypted");
         let restored = temp_path("restored");
-        let original = b"Honeycomb local vault test data\\0\\x01\\xff";
+        let original = b"Honeycomb local vault test data\0\\x01\\xff";
         fs::write(&source, original).unwrap();
         encrypt_file(&source, &encrypted, "a long test passphrase").unwrap();
         decrypt_file(&encrypted, &restored, "a long test passphrase").unwrap();
