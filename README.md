@@ -12,13 +12,7 @@ This Windows desktop prototype provides local file encryption and restoration:
 - XChaCha20-Poly1305 authenticated encryption.
 - Fresh random salt and nonce for each encrypted file.
 - Refuses to overwrite existing output files.
-- Automated tests for successful restore and wrong-passphrase rejection.
-
-## Build without installing Rust locally
-
-GitHub Actions builds the Windows x64 executable on a hosted `windows-latest` runner. Open the repository's **Actions** tab, select **Build Honeycomb for Windows**, and choose **Run workflow**. After it succeeds, open the run and download the **Honeycomb-Windows-x64** artifact.
-
-Every push to the main/master branch that changes Rust source, Cargo configuration, or the workflow also triggers a build.
+- Automated tests for successful restore and wrong-passphrase rejection
 
 ## Important limitations
 
