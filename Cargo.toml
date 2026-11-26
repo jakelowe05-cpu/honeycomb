@@ -1,0 +1,21 @@
+[package]
+name = "honeycomb"
+version = "0.2.0"
+edition = "2021"
+description = "Honeycomb local-first encrypted storage prototype"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+argon2 = "0.5"
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+eframe = { version = "0.27", default-features = false, features = ["default_fonts", "glow"] }
+rfd = "0.14"
+rand = "0.8"
+zeroize = "1"
+
+[profile.release]
+opt-level = 2
+lto = true
+codegen-units = 1
+strip = true
