@@ -30,11 +30,10 @@ enum Mode {
 
 impl eframe::App for HoneycombApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some(rx) = &self.peer_rx {
-            if let Ok(message) = rx.try_recv() {
-                self.peer_status = message;
-                self.peer_rx = None;
-            }
+        let received_message = self.peer_rx.as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(message) = received_message {
+            self.peer_status = message;
+            self.peer_rx = None;
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
