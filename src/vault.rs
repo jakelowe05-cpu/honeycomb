@@ -82,11 +82,14 @@ pub fn decrypt_file(input: &Path, output: &Path, passphrase: &str) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{fs, sync::atomic::{AtomicU64, Ordering}, time::{SystemTime, UNIX_EPOCH}};
+
+    static TEST_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_path(name: &str) -> std::path::PathBuf {
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("honeycomb-{name}-{stamp}"))
+        let unique = TEST_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("honeycomb-{name}-{}-{stamp}-{unique}", std::process::id()))
     }
 
     #[test]
