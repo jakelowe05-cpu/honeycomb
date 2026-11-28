@@ -233,8 +233,8 @@ pub fn accept_pairing(bind_address: &str, passphrase: &str, expected_code: &str)
     let received = transport.read_message(&incoming, &mut payload)?;
     let peer = verify_hello(&payload[..received], &binding)?;
 
-    let confirm = serde_json::to_vec(&PairConfirm { code: code.clone() })?;
-    let length = transport.write_message(&confirm, &mut message)?;
+    let responder_hello = hello(&identity, &binding)?;
+    let length = transport.write_message(&responder_hello, &mut message)?;
     send_frame(&mut stream, &message[..length])?;
 
     let incoming = receive_frame(&mut stream)?;
