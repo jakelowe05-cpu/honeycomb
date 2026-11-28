@@ -36,9 +36,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path package | Out-Null
           Copy-Item target/release/honeycomb.exe package/
           @'
-          Honeycomb 0.2 prototype
-          This build provides local file encryption and restoration only.
-          It does not yet provide peer-to-peer backup or synchronization.
+          Honeycomb 0.5 prototype
+          Local encrypted folder backups with snapshots, automatic change detection, and restore.
+          Peer-to-peer device pairing and replicated storage are still under development.
+          Keep a separate backup of important data; this prototype has not been security audited.
           '@ | Set-Content package/README.txt
           Compress-Archive -Path package/* -DestinationPath Honeycomb-Windows-x64.zip
 
