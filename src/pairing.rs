@@ -165,12 +165,16 @@ pub fn list_peers() -> Result<Vec<PeerInfo>> {
 }
 
 pub fn pair_with_peer(address: &str, passphrase: &str, pairing_code: &str) -> Result<PeerInfo> {
-    if pairing_code.trim().len() < 8 { bail!("Pairing code must be at least 8 characters."); }\n    let identity = crate::identity::unlock(passphrase)?;\n    let psk = derive_psk(pairing_code);\n    let mut stream = TcpStream::connect(address.trim())
+    if pairing_code.trim().len() < 8 { bail!("Pairing code must be at least 8 characters."); }
+    let identity = crate::identity::unlock(passphrase)?;
+    let psk = derive_psk(pairing_code);
+    let mut stream = TcpStream::connect(address.trim())
         .context("Could not connect to the Honeycomb peer. Check its address and firewall.")?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
 
-    let mut noise = Builder::new(PAIRING_PATTERN.parse()?).build_initiator()?;\n    noise.set_psk(0, &psk)?;
+    let mut noise = Builder::new(PAIRING_PATTERN.parse()?).build_initiator()?;
+    noise.set_psk(0, &psk)?;
     let mut message = vec![0u8; MAX_FRAME];
     let mut payload = vec![0u8; MAX_FRAME];
 
@@ -208,13 +212,17 @@ pub fn pair_with_peer(address: &str, passphrase: &str, pairing_code: &str) -> Re
 }
 
 pub fn accept_pairing(bind_address: &str, passphrase: &str, pairing_code: &str) -> Result<PeerInfo> {
-    if pairing_code.trim().len() < 8 { bail!("Pairing code must be at least 8 characters."); }\n    let identity = crate::identity::unlock(passphrase)?;\n    let psk = derive_psk(pairing_code);\n    let listener = TcpListener::bind(bind_address.trim())
+    if pairing_code.trim().len() < 8 { bail!("Pairing code must be at least 8 characters."); }
+    let identity = crate::identity::unlock(passphrase)?;
+    let psk = derive_psk(pairing_code);
+    let listener = TcpListener::bind(bind_address.trim())
         .context("Could not listen for Honeycomb pairing. Check the address, port, and firewall.")?;
     let (mut stream, remote_address) = listener.accept().context("Could not accept pairing connection")?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
 
-    let mut noise = Builder::new(PAIRING_PATTERN.parse()?).build_responder()?;\n    noise.set_psk(0, &psk)?;
+    let mut noise = Builder::new(PAIRING_PATTERN.parse()?).build_responder()?;
+    noise.set_psk(0, &psk)?;
     let mut message = vec![0u8; MAX_FRAME];
     let mut payload = vec![0u8; MAX_FRAME];
 
