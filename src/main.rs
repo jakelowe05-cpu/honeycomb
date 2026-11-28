@@ -1,5 +1,6 @@
 mod backup;
 mod identity;
+mod pairing;
 mod peer;
 mod vault;
 
@@ -22,6 +23,11 @@ struct HoneycombApp {
     auto_status: String,
     device_status: String,
     device_id: String,
+    peer_address: String,
+    pair_bind_address: String,
+    pairing_code: String,
+    pairing_status: String,
+    paired_peers: Vec<pairing::PeerInfo>,
 }
 
 impl eframe::App for HoneycombApp {
@@ -30,10 +36,6 @@ impl eframe::App for HoneycombApp {
             while let Ok(message) = rx.try_recv() {
                 self.auto_status = message;
             }
-        }
-
-        if self.paired_peers.is_empty() {
-            self.refresh_peers();
         }
 
         if self.device_status.is_empty() {
@@ -192,6 +194,72 @@ impl eframe::App for HoneycombApp {
                     }
                 }
                 ui.small("Pairing uses Noise NNpsk0 for encrypted, authenticated key exchange plus the device identity signature. The pairing code is not stored.");
+            });
+
+            ui.add_space(10.0);
+            ui.group(|ui| {
+                ui.heading("TRUSTED DEVICES");
+                ui.label("Pair directly with another Honeycomb device. Both devices must use the same one-time pairing code.");
+                ui.horizontal(|ui| {
+                    ui.label("Pairing code");
+                    ui.text_edit_singleline(&mut self.pairing_code);
+                    if ui.button("GENERATE CODE").clicked() {
+                        self.pairing_code = pairing::generate_pairing_code();
+                        self.pairing_status = "Share this code with the other device.".into();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Peer address");
+                    ui.text_edit_singleline(&mut self.peer_address);
+                    if ui.button("PAIR WITH DEVICE").clicked() {
+                        if self.pairing_code.trim().len() < 8 {
+                            self.pairing_status = "Use a pairing code of at least 8 characters.".into();
+                        } else if self.peer_address.trim().is_empty() {
+                            self.pairing_status = "Enter the peer address, for example 192.168.1.20:45820.".into();
+                        } else if self.backup_passphrase.len() < 12 {
+                            self.pairing_status = "Enter your device passphrase first.".into();
+                        } else {
+                            match pairing::pair_with_peer(&self.peer_address, &self.backup_passphrase, &self.pairing_code) {
+                                Ok(peer) => self.pairing_status = format!("Paired with device {}.", peer.device_id),
+                                Err(e) => self.pairing_status = format!("Pairing failed: {e:#}"),
+                            }
+                            self.backup_passphrase.zeroize();
+                            self.backup_confirm.zeroize();
+                            self.refresh_peers();
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Listen address");
+                    ui.text_edit_singleline(&mut self.pair_bind_address);
+                    if ui.button("ACCEPT PAIRING").clicked() {
+                        if self.pairing_code.trim().len() < 8 {
+                            self.pairing_status = "Enter the same pairing code used by the other device.".into();
+                        } else if self.backup_passphrase.len() < 12 {
+                            self.pairing_status = "Enter your device passphrase first.".into();
+                        } else {
+                            match pairing::accept_pairing(&self.pair_bind_address, &self.backup_passphrase, &self.pairing_code) {
+                                Ok(peer) => self.pairing_status = format!("Paired with device {}.", peer.device_id),
+                                Err(e) => self.pairing_status = format!("Pairing failed: {e:#}"),
+                            }
+                            self.backup_passphrase.zeroize();
+                            self.backup_confirm.zeroize();
+                            self.refresh_peers();
+                        }
+                    }
+                });
+                if !self.pairing_status.is_empty() {
+                    ui.label(&self.pairing_status);
+                }
+                if self.paired_peers.is_empty() {
+                    ui.weak("No trusted devices paired yet.");
+                } else {
+                    ui.label(format!("{} trusted device(s)", self.paired_peers.len()));
+                    for peer in &self.paired_peers {
+                        ui.small(format!("{} • {}", peer.device_id, peer.address));
+                    }
+                }
+                ui.small("Uses Noise NNpsk0 for encrypted transport and the device identity signature for peer authentication. The pairing code is not stored.");
             });
 
             ui.add_space(10.0);
