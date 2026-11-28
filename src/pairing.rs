@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, VerifyingKey, Verifier};
 use serde::{Deserialize, Serialize};
+use rand::{distributions::Alphanumeric, Rng};
 use sha2::{Digest, Sha256};
 use snow::Builder;
 use std::{
@@ -11,7 +12,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const PAIRING_PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
+const PAIRING_PATTERN: &str = "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
 const MAX_FRAME: usize = 64 * 1024;
 const PAIRING_CONTEXT: &[u8] = b"HONEYCOMB-PAIRING-V1";
 
@@ -87,9 +88,19 @@ fn binding(handshake_hash: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-pub fn verification_code(binding: &[u8; 32]) -> String {
-    let value = u32::from_be_bytes([binding[0], binding[1], binding[2], binding[3]]) % 1_000_000;
-    format!("{value:06}")
+pub fn generate_pairing_code() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(12)
+        .map(char::from)
+        .collect()
+}
+
+fn derive_psk(code: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"HONEYCOMB-PAIRING-PSK-V1");
+    hasher.update(code.trim().as_bytes());
+    hasher.finalize().into()
 }
 
 fn hello(identity: &crate::identity::DeviceIdentity, binding: &[u8; 32]) -> Result<Vec<u8>> {
@@ -153,14 +164,13 @@ pub fn list_peers() -> Result<Vec<PeerInfo>> {
     Ok(serde_json::from_slice(&fs::read(path)?)?)
 }
 
-pub fn pair_with_peer(address: &str, passphrase: &str, expected_code: &str) -> Result<PeerInfo> {
-    let identity = crate::identity::unlock(passphrase)?;
-    let mut stream = TcpStream::connect(address.trim())
+pub fn pair_with_peer(address: &str, passphrase: &str, pairing_code: &str) -> Result<PeerInfo> {
+    if pairing_code.trim().len() < 8 { bail!("Pairing code must be at least 8 characters."); }\n    let identity = crate::identity::unlock(passphrase)?;\n    let psk = derive_psk(pairing_code);\n    let mut stream = TcpStream::connect(address.trim())
         .context("Could not connect to the Honeycomb peer. Check its address and firewall.")?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
 
-    let mut noise = Builder::new(PAIRING_PATTERN.parse()?).build_initiator()?;
+    let mut noise = Builder::new(PAIRING_PATTERN.parse()?).build_initiator()?;\n    noise.set_psk(0, &psk)?;
     let mut message = vec![0u8; MAX_FRAME];
     let mut payload = vec![0u8; MAX_FRAME];
 
@@ -173,11 +183,6 @@ pub fn pair_with_peer(address: &str, passphrase: &str, expected_code: &str) -> R
         bail!("Pairing handshake did not finish.");
     }
     let binding = binding(noise.get_handshake_hash());
-    let code = verification_code(&binding);
-    if expected_code.trim() != code {
-        bail!("Verification code does not match the peer. Pairing cancelled.");
-    }
-
     let mut transport = noise.into_transport_mode()?;
     let hello = hello(&identity, &binding)?;
     let length = transport.write_message(&hello, &mut message)?;
@@ -187,7 +192,7 @@ pub fn pair_with_peer(address: &str, passphrase: &str, expected_code: &str) -> R
     let received = transport.read_message(&incoming, &mut payload)?;
     let peer = verify_hello(&payload[..received], &binding)?;
 
-    let confirm = serde_json::to_vec(&PairConfirm { code })?;
+    let confirm = serde_json::to_vec(&PairConfirm { code: pairing_code.trim().to_owned() })?;
     let length = transport.write_message(&confirm, &mut message)?;
     send_frame(&mut stream, &message[..length])?;
 
@@ -202,15 +207,14 @@ pub fn pair_with_peer(address: &str, passphrase: &str, expected_code: &str) -> R
     Ok(peer)
 }
 
-pub fn accept_pairing(bind_address: &str, passphrase: &str, expected_code: &str) -> Result<PeerInfo> {
-    let identity = crate::identity::unlock(passphrase)?;
-    let listener = TcpListener::bind(bind_address.trim())
+pub fn accept_pairing(bind_address: &str, passphrase: &str, pairing_code: &str) -> Result<PeerInfo> {
+    if pairing_code.trim().len() < 8 { bail!("Pairing code must be at least 8 characters."); }\n    let identity = crate::identity::unlock(passphrase)?;\n    let psk = derive_psk(pairing_code);\n    let listener = TcpListener::bind(bind_address.trim())
         .context("Could not listen for Honeycomb pairing. Check the address, port, and firewall.")?;
     let (mut stream, remote_address) = listener.accept().context("Could not accept pairing connection")?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
 
-    let mut noise = Builder::new(PAIRING_PATTERN.parse()?).build_responder()?;
+    let mut noise = Builder::new(PAIRING_PATTERN.parse()?).build_responder()?;\n    noise.set_psk(0, &psk)?;
     let mut message = vec![0u8; MAX_FRAME];
     let mut payload = vec![0u8; MAX_FRAME];
 
@@ -223,11 +227,6 @@ pub fn accept_pairing(bind_address: &str, passphrase: &str, expected_code: &str)
         bail!("Pairing handshake did not finish.");
     }
     let binding = binding(noise.get_handshake_hash());
-    let code = verification_code(&binding);
-    if expected_code.trim() != code {
-        bail!("Verification code does not match the peer. Pairing cancelled.");
-    }
-
     let mut transport = noise.into_transport_mode()?;
     let incoming = receive_frame(&mut stream)?;
     let received = transport.read_message(&incoming, &mut payload)?;
@@ -241,7 +240,7 @@ pub fn accept_pairing(bind_address: &str, passphrase: &str, expected_code: &str)
     let received = transport.read_message(&incoming, &mut payload)?;
     let received_confirm: PairConfirm = serde_json::from_slice(&payload[..received])
         .context("Invalid pairing confirmation")?;
-    if received_confirm.code != code {
+    if received_confirm.code != pairing_code.trim() {
         bail!("Peer confirmation code did not match.");
     }
 
@@ -261,18 +260,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn verification_code_is_six_digits_and_stable() {
-        let binding = [7u8; 32];
-        assert_eq!(verification_code(&binding), "117901");
-        assert_eq!(verification_code(&binding), verification_code(&binding));
-    }
-
-    #[test]
-    fn different_bindings_produce_different_codes() {
-        let mut a = [0u8; 32];
-        let mut b = [0u8; 32];
-        a[0] = 1;
-        b[0] = 2;
-        assert_ne!(verification_code(&a), verification_code(&b));
+    fn pairing_codes_are_random_length_and_psk_is_stable() {
+        let code = generate_pairing_code();
+        assert_eq!(code.len(), 12);
+        assert_eq!(derive_psk("example-code"), derive_psk("example-code"));
+        assert_ne!(derive_psk("example-code"), derive_psk("different-code"));
     }
 }
