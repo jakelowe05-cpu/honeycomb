@@ -1,4 +1,4 @@
-mod backup;
+mod backup;\nmod identity;
 mod peer;
 mod vault;
 
@@ -18,7 +18,7 @@ struct HoneycombApp {
     auto_running: bool,
     auto_stop: Option<Arc<AtomicBool>>,
     auto_rx: Option<mpsc::Receiver<String>>,
-    auto_status: String,
+    auto_status: String,\n    device_status: String,\n    device_id: String,
 }
 
 impl eframe::App for HoneycombApp {
@@ -26,6 +26,17 @@ impl eframe::App for HoneycombApp {
         if let Some(rx) = &self.auto_rx {
             while let Ok(message) = rx.try_recv() {
                 self.auto_status = message;
+            }
+        }
+
+        if self.device_status.is_empty() {
+            match identity::identity_status() {
+                Ok(Some(info)) => {
+                    self.device_id = info.device_id;
+                    self.device_status = "Device identity is ready.".into();
+                }
+                Ok(None) => self.device_status = "No device identity created yet.".into(),
+                Err(e) => self.device_status = format!("Device identity status unavailable: {e:#}"),
             }
         }
 
@@ -87,6 +98,31 @@ impl eframe::App for HoneycombApp {
 
             ui.add_space(10.0);
             ui.group(|ui| {
+                ui.heading("THIS DEVICE");
+                ui.label(&self.device_status);
+                if !self.device_id.is_empty() {
+                    ui.label(format!("Device ID: {}", self.device_id));
+                    ui.small("This identifier is derived from this device's public cryptographic key.");
+                } else if ui.button("CREATE DEVICE IDENTITY").clicked() {
+                    if self.backup_passphrase.len() < 12 {
+                        self.device_status = "Enter a passphrase of at least 12 characters first.".into();
+                    } else {
+                        match identity::create(&self.backup_passphrase) {
+                            Ok(info) => {
+                                self.device_id = info.device_id;
+                                self.device_status = "Device identity created and encrypted on this computer.".into();
+                            }
+                            Err(e) => self.device_status = format!("Could not create device identity: {e:#}"),
+                        }
+                        self.backup_passphrase.zeroize();
+                        self.backup_confirm.zeroize();
+                    }
+                }
+                ui.small("The private device key stays encrypted locally. It is not uploaded to the backup repository.");
+            });
+
+            ui.add_space(10.0);
+            ui.group(|ui| {
                 ui.heading("SNAPSHOT HISTORY");
                 ui.horizontal(|ui| {
                     if ui.button("REFRESH").clicked() {
@@ -124,7 +160,7 @@ impl eframe::App for HoneycombApp {
                 ui.label("✓ Local encrypted snapshots");
                 ui.label("✓ Change detection and automatic backup");
                 ui.label("✓ Version history and restore");
-                ui.label("→ Device identity and secure pairing");
+                ui.label("✓ Device identity");\n                ui.label("→ Secure pairing between trusted devices");
                 ui.label("→ Encrypted peer storage and replication");
                 ui.label("→ Recovery across your devices and trusted people");
             });
