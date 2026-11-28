@@ -20,6 +20,13 @@ pub struct DeviceIdentity {
     pub info: DeviceInfo,
 }
 
+impl DeviceIdentity {
+    pub fn sign(&self, message: &[u8]) -> [u8; 64] {
+        use ed25519_dalek::Signer;
+        SigningKey::from_bytes(&self.secret).sign(message).to_bytes()
+    }
+}
+
 impl Drop for DeviceIdentity {
     fn drop(&mut self) {
         self.secret.zeroize();
