@@ -1,8 +1,8 @@
 [package]
 name = "honeycomb"
-version = "0.2.0"
+version = "0.5.0"
 edition = "2021"
-description = "Honeycomb local-first encrypted storage prototype"
+description = "Honeycomb decentralized encrypted backup prototype"
 license = "MIT"
 
 [dependencies]
