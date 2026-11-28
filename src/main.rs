@@ -1,4 +1,5 @@
-mod backup;\nmod identity;
+mod backup;
+mod identity;
 mod peer;
 mod vault;
 
@@ -18,7 +19,9 @@ struct HoneycombApp {
     auto_running: bool,
     auto_stop: Option<Arc<AtomicBool>>,
     auto_rx: Option<mpsc::Receiver<String>>,
-    auto_status: String,\n    device_status: String,\n    device_id: String,
+    auto_status: String,
+    device_status: String,
+    device_id: String,
 }
 
 impl eframe::App for HoneycombApp {
@@ -230,7 +233,8 @@ impl eframe::App for HoneycombApp {
                 ui.label("✓ Local encrypted snapshots");
                 ui.label("✓ Change detection and automatic backup");
                 ui.label("✓ Version history and restore");
-                ui.label("✓ Device identity");\n                ui.label("→ Secure pairing between trusted devices");
+                ui.label("✓ Device identity");
+                ui.label("→ Secure pairing between trusted devices");
                 ui.label("→ Encrypted peer storage and replication");
                 ui.label("→ Recovery across your devices and trusted people");
             });
