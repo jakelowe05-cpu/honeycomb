@@ -19,6 +19,7 @@ sha2 = "0.10"
 walkdir = "2"
 zeroize = "1"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+snow = "0.10"
 
 [profile.release]
 opt-level = 2
