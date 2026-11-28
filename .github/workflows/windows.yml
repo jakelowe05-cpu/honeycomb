@@ -42,11 +42,15 @@ jobs:
           Keep a separate backup of important data; this prototype has not been security audited.
           '@ | Set-Content package/README.txt
           Compress-Archive -Path package/* -DestinationPath Honeycomb-Windows-x64.zip
+          $hash = (Get-FileHash Honeycomb-Windows-x64.zip -Algorithm SHA256).Hash
+          "$hash  Honeycomb-Windows-x64.zip" | Set-Content Honeycomb-Windows-x64.zip.sha256
 
-      - name: Upload downloadable build
+      - name: Upload downloadable build and checksum
         uses: actions/upload-artifact@v4
         with:
           name: Honeycomb-Windows-x64
-          path: Honeycomb-Windows-x64.zip
+          path: |
+            Honeycomb-Windows-x64.zip
+            Honeycomb-Windows-x64.zip.sha256
           if-no-files-found: error
           retention-days: 30
