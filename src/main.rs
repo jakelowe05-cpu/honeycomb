@@ -1,232 +1,266 @@
-mod vault;
+mod backup;
 mod peer;
+mod vault;
 
 use eframe::egui;
-use std::{path::PathBuf, sync::mpsc, thread};
+use std::{path::PathBuf, sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}}};
 use zeroize::Zeroize;
 
 #[derive(Default)]
 struct HoneycombApp {
-    selected_file: Option<PathBuf>,
-    output_file: String,
-    passphrase: String,
-    confirm_passphrase: String,
-    mode: Mode,
-    status: String,
-    send_file: Option<PathBuf>,
-    peer_address: String,
-    receive_bind: String,
-    receive_output: String,
-    peer_status: String,
-    peer_rx: Option<mpsc::Receiver<String>>,
-}
-
-#[derive(Default, PartialEq, Clone, Copy)]
-enum Mode {
-    #[default]
-    Encrypt,
-    Decrypt,
+    backup_source: String,
+    backup_repo: String,
+    backup_passphrase: String,
+    backup_confirm: String,
+    backup_status: String,
+    snapshots: Vec<backup::Snapshot>,
+    selected_snapshot: usize,
+    auto_running: bool,
+    auto_stop: Option<Arc<AtomicBool>>,
+    auto_rx: Option<mpsc::Receiver<String>>,
+    auto_status: String,
 }
 
 impl eframe::App for HoneycombApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let received_message = self.peer_rx.as_ref().and_then(|rx| rx.try_recv().ok());
-        if let Some(message) = received_message {
-            self.peer_status = message;
-            self.peer_rx = None;
+        if let Some(rx) = &self.auto_rx {
+            while let Ok(message) = rx.try_recv() {
+                self.auto_status = message;
+            }
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.heading("HONEYCOMB");
                 ui.label("Your data. Your devices. Your people.");
+                ui.label("Encrypted backup • snapshots • recovery");
                 ui.add_space(12.0);
             });
 
             ui.group(|ui| {
-                ui.label("LOCAL FILE PROTECTION");
+                ui.heading("BACK UP A FOLDER");
+                ui.label("Honeycomb watches this folder and creates encrypted snapshots.");
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.mode, Mode::Encrypt, "Encrypt a file");
-                    ui.selectable_value(&mut self.mode, Mode::Decrypt, "Restore a file");
+                    ui.label("Folder to protect");
+                    ui.text_edit_singleline(&mut self.backup_source);
+                    if ui.button("Browse…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                            self.backup_source = path.to_string_lossy().to_string();
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Honeycomb repository");
+                    ui.text_edit_singleline(&mut self.backup_repo);
+                    if ui.button("Browse…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                            self.backup_repo = path.to_string_lossy().to_string();
+                        }
+                    }
+                });
+                ui.label("Backup passphrase");
+                ui.add(egui::TextEdit::singleline(&mut self.backup_passphrase).password(true));
+                ui.label("Confirm passphrase");
+                ui.add(egui::TextEdit::singleline(&mut self.backup_confirm).password(true));
+
+                ui.horizontal(|ui| {
+                    if ui.button("CREATE SNAPSHOT NOW").clicked() {
+                        self.create_snapshot();
+                    }
+                    if !self.auto_running {
+                        if ui.button("START AUTOMATIC BACKUP").clicked() {
+                            self.start_automatic_backup();
+                        }
+                    } else if ui.button("STOP AUTOMATIC BACKUP").clicked() {
+                        self.stop_automatic_backup();
+                    }
                 });
 
-                if ui.button("Choose file…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().pick_file() {
-                        self.output_file = match self.mode {
-                            Mode::Encrypt => format!("{}.hny", path.display()),
-                            Mode::Decrypt => {
-                                let mut p = path.clone();
-                                p.set_extension("restored");
-                                p.to_string_lossy().to_string()
-                            }
-                        };
-                        self.selected_file = Some(path);
-                        self.status.clear();
+                if !self.backup_status.is_empty() {
+                    ui.label(&self.backup_status);
+                }
+                if !self.auto_status.is_empty() {
+                    ui.small(&self.auto_status);
+                }
+                ui.small("Automatic backup checks for changes about once per minute. The repository should be on a different location from the folder being protected.");
+            });
+
+            ui.add_space(10.0);
+            ui.group(|ui| {
+                ui.heading("SNAPSHOT HISTORY");
+                ui.horizontal(|ui| {
+                    if ui.button("REFRESH").clicked() {
+                        self.refresh_snapshots();
                     }
-                }
+                    ui.label(format!("{} snapshot(s)", self.snapshots.len()));
+                });
 
-                if let Some(path) = &self.selected_file {
-                    ui.label(format!("Selected: {}", path.display()));
+                if self.snapshots.is_empty() {
+                    ui.weak("No snapshots loaded yet.");
                 } else {
-                    ui.weak("No file selected.");
-                }
+                    let labels: Vec<String> = self.snapshots.iter().map(|s| {
+                        format!("{} — {} file(s)", s.id, s.files.len())
+                    }).collect();
+                    let selected = self.selected_snapshot.min(labels.len().saturating_sub(1));
+                    self.selected_snapshot = selected;
+                    egui::ComboBox::from_label("Snapshot")
+                        .selected_text(&labels[selected])
+                        .show_ui(ui, |ui| {
+                            for (i, label) in labels.iter().enumerate() {
+                                ui.selectable_value(&mut self.selected_snapshot, i, label);
+                            }
+                        });
 
-                ui.add_space(8.0);
-                ui.label("Output file path");
-                ui.text_edit_singleline(&mut self.output_file);
-                ui.add_space(8.0);
-                ui.label("Passphrase (minimum 12 characters)");
-                ui.add(egui::TextEdit::singleline(&mut self.passphrase).password(true));
-
-                if self.mode == Mode::Encrypt {
-                    ui.label("Confirm passphrase");
-                    ui.add(egui::TextEdit::singleline(&mut self.confirm_passphrase).password(true));
-                }
-
-                ui.add_space(12.0);
-                let action = match self.mode {
-                    Mode::Encrypt => "ENCRYPT FILE",
-                    Mode::Decrypt => "RESTORE FILE",
-                };
-                if ui.button(action).clicked() {
-                    self.run_action();
-                }
-                if !self.status.is_empty() {
-                    ui.label(&self.status);
+                    if ui.button("RESTORE SELECTED SNAPSHOT").clicked() {
+                        self.restore_selected();
+                    }
+                    ui.small("Restore into a new or empty folder so existing files are not overwritten.");
                 }
             });
 
             ui.add_space(10.0);
             ui.group(|ui| {
-                ui.label("DIRECT ENCRYPTED TRANSFER (LOCAL NETWORK)");
-                ui.label("Send only .hny files. Your passphrase is never sent.");
-
-                if ui.button("Choose encrypted file to send…").clicked() {
-                    self.send_file = rfd::FileDialog::new()
-                        .add_filter("Honeycomb encrypted file", &["hny"])
-                        .pick_file();
-                }
-                if let Some(path) = &self.send_file {
-                    ui.label(format!("File: {}", path.display()));
-                }
-                ui.horizontal(|ui| {
-                    ui.label("Friend's address");
-                    ui.text_edit_singleline(&mut self.peer_address);
-                });
-                if ui.button("SEND ENCRYPTED FILE").clicked() {
-                    if let Some(path) = self.send_file.clone() {
-                        let address = self.peer_address.clone();
-                        let (tx, rx) = mpsc::channel();
-                        self.peer_rx = Some(rx);
-                        self.peer_status = "Connecting and sending…".into();
-                        thread::spawn(move || {
-                            let message = match peer::send_encrypted_file(&path, &address) {
-                                Ok(()) => "Transfer sent. The other computer should have the encrypted file.".to_string(),
-                                Err(e) => format!("Send failed: {e:#}"),
-                            };
-                            let _ = tx.send(message);
-                        });
-                    } else {
-                        self.peer_status = "Choose a .hny file first.".into();
-                    }
-                }
-
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Listen on");
-                    if self.receive_bind.is_empty() {
-                        self.receive_bind = "0.0.0.0:45820".into();
-                    }
-                    ui.text_edit_singleline(&mut self.receive_bind);
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Save received file as");
-                    ui.text_edit_singleline(&mut self.receive_output);
-                    if ui.button("Browse…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Honeycomb encrypted file", &["hny"])
-                            .save_file() {
-                            self.receive_output = path.to_string_lossy().to_string();
-                        }
-                    }
-                });
-                if ui.button("WAIT FOR ONE FILE").clicked() {
-                    let bind = self.receive_bind.clone();
-                    let output = PathBuf::from(self.receive_output.trim());
-                    let (tx, rx) = mpsc::channel();
-                    self.peer_rx = Some(rx);
-                    self.peer_status = "Listening for one incoming transfer…".into();
-                    thread::spawn(move || {
-                        let message = if output.as_os_str().is_empty() {
-                            "Choose where to save the received file.".to_string()
-                        } else {
-                            match peer::receive_one(&bind, &output) {
-                                Ok(()) => format!("Received encrypted file: {}", output.display()),
-                                Err(e) => format!("Receive failed: {e:#}"),
-                            }
-                        };
-                        let _ = tx.send(message);
-                    });
-                }
-                if !self.peer_status.is_empty() {
-                    ui.label(&self.peer_status);
-                }
-                ui.small("Both computers must be able to reach each other on the same network. Allow Honeycomb through Windows Firewall on private networks only.");
+                ui.heading("WHAT'S NEXT");
+                ui.label("✓ Local encrypted snapshots");
+                ui.label("✓ Change detection and automatic backup");
+                ui.label("✓ Version history and restore");
+                ui.label("→ Device identity and secure pairing");
+                ui.label("→ Encrypted peer storage and replication");
+                ui.label("→ Recovery across your devices and trusted people");
             });
 
-            ui.add_space(8.0);
             ui.separator();
-            ui.small("Prototype 0.3 • Local encryption + one-file LAN transfer");
-            ui.small("Not security-audited. Keep separate backups of important files.");
+            ui.small("Honeycomb prototype 0.4 • First real backup milestone");
+            ui.small("Not security-audited. Keep independent backups of important data.");
         });
-        if self.peer_rx.is_some() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+
+        if self.auto_running {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
     }
 }
 
 impl HoneycombApp {
-    fn run_action(&mut self) {
-        let Some(input) = self.selected_file.clone() else {
-            self.status = "Choose a file first.".into();
-            return;
-        };
-        let output = PathBuf::from(self.output_file.trim());
-        if self.output_file.trim().is_empty() {
-            self.status = "Choose an output filename.".into();
-            return;
+    fn validate_backup_inputs(&self) -> Result<(PathBuf, PathBuf), String> {
+        let source = PathBuf::from(self.backup_source.trim());
+        let repo = PathBuf::from(self.backup_repo.trim());
+        if self.backup_source.trim().is_empty() || self.backup_repo.trim().is_empty() {
+            return Err("Choose both the folder to protect and the Honeycomb repository.".into());
         }
-        if output.exists() {
-            self.status = "That output file already exists. Choose a different name.".into();
-            return;
+        if !source.is_dir() {
+            return Err("The folder to protect does not exist.".into());
         }
-        if self.passphrase.len() < 12 {
-            self.status = "Use a passphrase of at least 12 characters.".into();
-            return;
+        if source == repo {
+            return Err("The repository must be different from the folder being protected.".into());
         }
-        if self.mode == Mode::Encrypt && self.passphrase != self.confirm_passphrase {
-            self.status = "The passphrases do not match.".into();
-            return;
+        if self.backup_passphrase.len() < 12 {
+            return Err("Use a backup passphrase of at least 12 characters.".into());
         }
+        if self.backup_passphrase != self.backup_confirm {
+            return Err("The backup passphrases do not match.".into());
+        }
+        Ok((source, repo))
+    }
 
-        let result = match self.mode {
-            Mode::Encrypt => vault::encrypt_file(&input, &output, &self.passphrase),
-            Mode::Decrypt => vault::decrypt_file(&input, &output, &self.passphrase),
+    fn create_snapshot(&mut self) {
+        let (source, repo) = match self.validate_backup_inputs() {
+            Ok(v) => v,
+            Err(e) => { self.backup_status = e; return; }
         };
-        self.passphrase.zeroize();
-        self.confirm_passphrase.zeroize();
-        self.status = match result {
-            Ok(()) => format!("Success. Output saved to: {}", output.display()),
-            Err(e) => format!("Could not complete operation: {e:#}"),
+        match backup::create_snapshot(&source, &repo, &self.backup_passphrase) {
+            Ok((snapshot, summary)) => {
+                self.backup_status = format!(
+                    "Snapshot {} created. {} files scanned, {} encrypted, {} unchanged/reused.",
+                    snapshot.id, summary.scanned, summary.encrypted, summary.reused
+                );
+                self.refresh_snapshots();
+            }
+            Err(e) => self.backup_status = format!("Backup failed: {e:#}"),
+        }
+        self.backup_passphrase.zeroize();
+        self.backup_confirm.zeroize();
+    }
+
+    fn refresh_snapshots(&mut self) {
+        let repo = PathBuf::from(self.backup_repo.trim());
+        if repo.as_os_str().is_empty() || self.backup_passphrase.len() < 12 {
+            self.backup_status = "Enter the repository and backup passphrase to refresh snapshots.".into();
+            return;
+        }
+        match backup::list_snapshots(&repo, &self.backup_passphrase) {
+            Ok(items) => {
+                self.snapshots = items;
+                self.selected_snapshot = self.snapshots.len().saturating_sub(1);
+                self.backup_status = format!("Loaded {} snapshot(s).", self.snapshots.len());
+            }
+            Err(e) => self.backup_status = format!("Could not unlock snapshots: {e:#}"),
+        }
+        self.backup_passphrase.zeroize();
+    }
+
+    fn restore_selected(&mut self) {
+        let repo = PathBuf::from(self.backup_repo.trim());
+        if repo.as_os_str().is_empty() || self.snapshots.is_empty() {
+            self.backup_status = "Load a snapshot first.".into();
+            return;
+        }
+        if self.backup_passphrase.len() < 12 {
+            self.backup_status = "Enter the backup passphrase first.".into();
+            return;
+        }
+        let Some(destination) = rfd::FileDialog::new().pick_folder() else {
+            self.backup_status = "Restore cancelled.".into();
+            return;
         };
+        let snapshot_id = self.snapshots[self.selected_snapshot].id.clone();
+        match backup::restore_snapshot(&repo, &destination, &self.backup_passphrase, &snapshot_id) {
+            Ok(count) => self.backup_status = format!("Restored {} file(s) from snapshot {}.", count, snapshot_id),
+            Err(e) => self.backup_status = format!("Restore failed: {e:#}"),
+        }
+        self.backup_passphrase.zeroize();
+    }
+
+    fn start_automatic_backup(&mut self) {
+        let (source, repo) = match self.validate_backup_inputs() {
+            Ok(v) => v,
+            Err(e) => { self.backup_status = e; return; }
+        };
+        let passphrase = self.backup_passphrase.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+        backup::start_auto_backup(source, repo, passphrase, stop.clone(), tx);
+        self.auto_stop = Some(stop);
+        self.auto_rx = Some(rx);
+        self.auto_running = true;
+        self.auto_status = "Automatic backup is running.".into();
+        self.backup_passphrase.zeroize();
+        self.backup_confirm.zeroize();
+    }
+
+    fn stop_automatic_backup(&mut self) {
+        if let Some(stop) = &self.auto_stop {
+            stop.store(true, Ordering::Relaxed);
+        }
+        self.auto_stop = None;
+        self.auto_rx = None;
+        self.auto_running = false;
+        self.auto_status = "Automatic backup stopped.".into();
+    }
+}
+
+impl Drop for HoneycombApp {
+    fn drop(&mut self) {
+        if let Some(stop) = &self.auto_stop {
+            stop.store(true, Ordering::Relaxed);
+        }
     }
 }
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([760.0, 820.0])
-            .with_min_inner_size([620.0, 650.0])
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([820.0, 900.0])
+            .with_min_inner_size([680.0, 700.0])
             .with_title("Honeycomb"),
         ..Default::default()
     };
