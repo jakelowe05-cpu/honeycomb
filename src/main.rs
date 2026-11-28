@@ -130,7 +130,7 @@ impl eframe::App for HoneycombApp {
             });
 
             ui.separator();
-            ui.small("Honeycomb prototype 0.4 • First real backup milestone");
+            ui.small("Honeycomb 0.5 • Safer local backup foundation");
             ui.small("Not security-audited. Keep independent backups of important data.");
         });
 
@@ -150,8 +150,8 @@ impl HoneycombApp {
         if !source.is_dir() {
             return Err("The folder to protect does not exist.".into());
         }
-        if source == repo {
-            return Err("The repository must be different from the folder being protected.".into());
+        if let Err(error) = backup::validate_backup_locations(&source, &repo) {
+            return Err(format!("{error:#}"));
         }
         if self.backup_passphrase.len() < 12 {
             return Err("Use a backup passphrase of at least 12 characters.".into());
